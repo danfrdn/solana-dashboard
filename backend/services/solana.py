@@ -3,23 +3,38 @@ import asyncio
 import websockets
 from dotenv import load_dotenv
 import json
+from loguru import logger
+from backend.services.kafka_producer import KafkaProducerService # Import our new producer
 
+# Configure loguru logger
+logger.remove() # Remove default handler to avoid duplicate output if already configured
+logger.add(os.sys.stderr, level="INFO") # Add back stderr handler for console output
+
+# Load environment variables from .env file
 load_dotenv()
 
 # Public Solana Devnet WebSocket URL
 WSS_URL = "wss://api.devnet.solana.com/"
 
-async def connect_to_solana_websocket():
+# Kafka Configuration from .env, with local defaults for development
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_RAW_TRANSACTIONS_TOPIC = os.getenv("KAFKA_RAW_TRANSACTIONS_TOPIC", "solana_raw_transactions")
+
+async def connect_to_solana_websocket_and_produce_to_kafka():
     """
-    Connects to the public Solana Devnet WebSocket and subscribes to logs.
-    Prints incoming messages to the console.
+    Connects to the public Solana Devnet WebSocket, subscribes to logs,
+    and produces raw messages to Kafka.
     """
-    print(f"Connecting to public Solana Devnet WebSocket: {WSS_URL}")
+    logger.info(f"Initializing Kafka Producer for topic: '{KAFKA_RAW_TRANSACTIONS_TOPIC}' on servers: '{KAFKA_BOOTSTRAP_SERVERS}'")
+    kafka_producer = KafkaProducerService(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        topic=KAFKA_RAW_TRANSACTIONS_TOPIC
+    )
+
+    logger.info(f"Connecting to public Solana Devnet WebSocket: {WSS_URL}")
+    # The `async for websocket` loop automatically handles reconnection attempts
     async for websocket in websockets.connect(WSS_URL):
         try:
-            # Subscribe to all logs for all transactions.
-            # This is a standard Solana RPC method, compatible with public endpoints.
-
             subscription_request = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -27,24 +42,35 @@ async def connect_to_solana_websocket():
                 "params": ["all"]
             }
             await websocket.send(json.dumps(subscription_request))
-            print("Subscribed to all transaction logs on public Solana devnet.")
+            logger.info("Subscribed to all transaction logs on public Solana devnet.")
 
             while True:
                 message = await websocket.recv()
-                # For initial testing, just print the message
-                print("Received Solana log message:")
-                print(message[:500] + "..." if len(message) > 500 else message)
+                # Parse the JSON string into a Python dictionary
+                message_dict = json.loads(message)
+
+                # Produce the raw message (as a dictionary) to Kafka
+                kafka_producer.produce_message(message_dict)
+                # For high volume, avoid verbose debug logging unless necessary
+                # logger.debug(f"Produced message to Kafka (first 100 chars): {message[:100]}...")
 
         except websockets.exceptions.ConnectionClosed:
-            print("Solana WebSocket connection closed. Reconnecting...")
+            logger.warning("Solana WebSocket connection closed. Reconnecting in 1 second...")
+            await asyncio.sleep(1) # Small delay before attempting reconnection
             continue
         except Exception as e:
-            print(f"An error occurred: {e}. Reconnecting...")
+            logger.error(f"An unexpected error occurred: {e}. Reconnecting in 1 second...")
+            await asyncio.sleep(1) # Small delay before attempting reconnection
             continue
+        finally:
+            # Ensure any buffered messages are sent to Kafka before the WebSocket potentially reconnects
+            kafka_producer.flush()
 
 if __name__ == "__main__":
-    print("Starting Solana WebSocket client (press Ctrl+C to stop)...")
+    logger.info("Starting Solana WebSocket client and Kafka producer (press Ctrl+C to stop)...")
     try:
-        asyncio.run(connect_to_solana_websocket())
+        asyncio.run(connect_to_solana_websocket_and_produce_to_kafka())
     except KeyboardInterrupt:
-        print("Solana WebSocket client stopped.")
+        logger.info("Solana WebSocket client and Kafka producer stopped.")
+    except Exception as e:
+        logger.error(f"Application failed to start: {e}")
