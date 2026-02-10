@@ -4,7 +4,6 @@ import websockets
 from dotenv import load_dotenv
 import json
 from loguru import logger
-from backend.services.kafka_producer import KafkaProducerService # Import our new producer
 
 from services.kafka_producer import KafkaProducerService
 
@@ -18,7 +17,6 @@ load_dotenv()
 # Public Solana Devnet WebSocket URL
 WSS_URL = "wss://api.devnet.solana.com/"
 
-# Kafka Configuration from .env, with local defaults for development
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 KAFKA_RAW_TRANSACTIONS_TOPIC = os.getenv("KAFKA_RAW_TRANSACTIONS_TOPIC", "solana_raw_transactions")
 
@@ -34,7 +32,6 @@ async def connect_to_solana_websocket_and_produce_to_kafka():
     )
 
     logger.info(f"Connecting to public Solana Devnet WebSocket: {WSS_URL}")
-    # The `async for websocket` loop automatically handles reconnection attempts
     async for websocket in websockets.connect(WSS_URL):
         try:
             subscription_request = {
@@ -48,13 +45,8 @@ async def connect_to_solana_websocket_and_produce_to_kafka():
 
             while True:
                 message = await websocket.recv()
-                # Parse the JSON string into a Python dictionary
                 message_dict = json.loads(message)
-
-                # Produce the raw message (as a dictionary) to Kafka
                 kafka_producer.produce_message(message_dict)
-                # For high volume, avoid verbose debug logging unless necessary
-                # logger.debug(f"Produced message to Kafka (first 100 chars): {message[:100]}...")
 
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Solana WebSocket connection closed. Reconnecting in 1 second...")
@@ -65,7 +57,6 @@ async def connect_to_solana_websocket_and_produce_to_kafka():
             await asyncio.sleep(1)
             continue
         finally:
-            # Ensure any buffered messages are sent to Kafka before the WebSocket potentially reconnects
             kafka_producer.flush()
 
 if __name__ == "__main__":
