@@ -6,11 +6,13 @@ import json
 from loguru import logger
 from backend.services.kafka_producer import KafkaProducerService # Import our new producer
 
-# Configure loguru logger
-logger.remove() # Remove default handler to avoid duplicate output if already configured
-logger.add(os.sys.stderr, level="INFO") # Add back stderr handler for console output
+from services.kafka_producer import KafkaProducerService
 
-# Load environment variables from .env file
+
+logger.remove()
+logger.add(os.sys.stderr, level="INFO")
+
+
 load_dotenv()
 
 # Public Solana Devnet WebSocket URL
@@ -56,11 +58,11 @@ async def connect_to_solana_websocket_and_produce_to_kafka():
 
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Solana WebSocket connection closed. Reconnecting in 1 second...")
-            await asyncio.sleep(1) # Small delay before attempting reconnection
+            await asyncio.sleep(1) 
             continue
         except Exception as e:
             logger.error(f"An unexpected error occurred: {e}. Reconnecting in 1 second...")
-            await asyncio.sleep(1) # Small delay before attempting reconnection
+            await asyncio.sleep(1)
             continue
         finally:
             # Ensure any buffered messages are sent to Kafka before the WebSocket potentially reconnects
