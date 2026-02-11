@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import json
 from loguru import logger
 
-from services.kafka_producer import KafkaProducerService
+from backend.services.kafka_producer import KafkaProducerService
 
 
 logger.remove()
